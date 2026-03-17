@@ -1,0 +1,24 @@
+{
+  "swag": {
+    "name": "SWAG (Main)",
+    "url": "https://db.swag.com.sa/odoo",
+    "db": "db2",
+    "user": "email-1181@swag.com.sa",
+    "api_key": "7ddbd5e498eb1b039beba7dab147be6a14fa8e47"
+  },
+  "larouche": {
+    "name": "La Rouche",
+    "url": "https://odooprosys-la-rouche.odoo.com",
+    "db": "odooprosys-la-rouche-production-12364313",
+    "user": "operations@swag.com.sa",
+    "api_key": "d89d6b0455ee76893573ef8e68ec6df2ad33ebeb"
+  },
+  "different_clothes": {
+    "name": "Different Clothes",
+    "url": "https://odooprosys-different-clothes.odoo.com",
+    "db": "odooprosys-different-clothes-production-16906605",
+    "user": "ziad.m@swag.com.sa",
+    "api_key": "05e22b60bc95bf9fd4323e41b428590a0c6c3f28"
+  },
+  "model_field": "default_code"
+}
