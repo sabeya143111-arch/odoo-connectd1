@@ -1,4 +1,4 @@
-
+import os
 import json
 import xmlrpc.client
 from functools import lru_cache
@@ -6,19 +6,93 @@ from functools import lru_cache
 import pandas as pd
 import streamlit as st
 
-CONFIG_FILE = "config.json"
+# -------------------------------------------------------------------
+# 1) Config / Secrets loading
+# -------------------------------------------------------------------
 
-
-@lru_cache(maxsize=1)
+@st.cache_resource(show_spinner=False)
 def load_config():
-    with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+    """
+    Optional: local config.json se sirf field names lo.
+    Secrets me company details honge.
+    """
+    cfg = {
+        "model_field": "default_code",
+        "template_model_field": "x_model_no",
+        "variant_code_field": "default_code",
+    }
 
+    # Agar local config.json hai to usse override kar lo (optional)
+    cfg_path = os.path.join(os.path.dirname(__file__), "config.json")
+    if os.path.exists(cfg_path):
+        try:
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                file_cfg = json.load(f)
+            cfg.update(file_cfg)
+        except Exception:
+            pass
+
+    return cfg
+
+
+@st.cache_resource(show_spinner=False)
+def load_companies_from_secrets():
+    """
+    Streamlit secrets se 3 Odoo systems + fields config load.
+    Secrets.toml structure:
+
+    [swag]
+    name = "SWAG (Main)"
+    url = "https://..."
+    db = "..."
+    user = "..."
+    api_key = "..."
+
+    [larouche]
+    ...
+
+    [different_clothes]
+    ...
+
+    [fields]
+    model_field = "default_code"
+    template_model_field = "x_model_no"
+    variant_code_field = "default_code"
+    """
+    base_cfg = load_config()
+
+    swag = dict(st.secrets["swag"])
+    larouche = dict(st.secrets["larouche"])
+    diffc = dict(st.secrets["different_clothes"])
+
+    fields = st.secrets.get("fields", {})
+    model_field = fields.get("model_field", base_cfg.get("model_field", "default_code"))
+    template_model_field = fields.get(
+        "template_model_field", base_cfg.get("template_model_field", "x_model_no")
+    )
+    variant_code_field = fields.get(
+        "variant_code_field", base_cfg.get("variant_code_field", "default_code")
+    )
+
+    cfg = {
+        "swag": swag,
+        "larouche": larouche,
+        "different_clothes": diffc,
+        "model_field": model_field,
+        "template_model_field": template_model_field,
+        "variant_code_field": variant_code_field,
+    }
+    return cfg
+
+
+# -------------------------------------------------------------------
+# 2) Odoo connection helpers
+# -------------------------------------------------------------------
 
 @st.cache_resource(show_spinner=False)
 def connect_odoo(sys_key: str, conf: dict):
     """
-    Connect to one Odoo instance via XML-RPC using API key as password.
+    Connects to one Odoo instance via XML-RPC using API key as password.
     """
     url = conf["url"].rstrip("/")
     db = conf["db"]
@@ -36,7 +110,7 @@ def connect_odoo(sys_key: str, conf: dict):
 
 def get_qty_for_models(sys_key: str, conf: dict, model_values, model_field: str):
     """
-    Old logic: bulk fetch qty_available for list of model_values from one Odoo.
+    Simple mode: bulk fetch qty_available for list of model_values from one Odoo.
     Works on product.product directly (single row per model).
     """
     if not model_values:
@@ -77,8 +151,9 @@ def get_template_and_variants(
     variant_code_field: str,
 ):
     """
-    1) Find product.template by template_model_field (e.g. x_model_no / default_code on template).
-    2) Read all product.product variants under that template.
+    Variant mode:
+      1) Find product.template by template_model_field (e.g. x_model_no).
+      2) Read all product.product variants under that template.
     Returns: dict with template and list of variant dicts.
     """
     db, uid, pwd, models = connect_odoo(sys_key, conf)
@@ -102,7 +177,6 @@ def get_template_and_variants(
     if not variant_ids:
         return {"template": tmpl, "variants": []}
 
-    # Variant fields we want
     variant_fields = [
         "id",
         "display_name",
@@ -123,7 +197,7 @@ def get_template_and_variants(
         {"fields": variant_fields},
     )
 
-    # Read attribute values for human readable combination
+    # Read attribute values for readable combination
     attr_value_ids = set()
     for v in variants:
         for av in v.get("attribute_value_ids", []):
@@ -139,11 +213,9 @@ def get_template_and_variants(
             [list(attr_value_ids)],
             {"fields": ["id", "name", "attribute_id"]},
         )
-        # attribute_id is (id, name)
         for av in attr_values:
             attr_values_map[av["id"]] = av
 
-    # Build cleaner variant records
     clean_variants = []
     for v in variants:
         av_ids = v.get("attribute_value_ids", [])
@@ -209,6 +281,10 @@ def build_variant_map_for_system(
     return template_name_map, variant_map
 
 
+# -------------------------------------------------------------------
+# 3) Streamlit UI
+# -------------------------------------------------------------------
+
 def main():
     st.set_page_config(
         page_title="Odoo Multi-DB Stock Compare",
@@ -216,19 +292,18 @@ def main():
         layout="wide",
     )
 
-    cfg = load_config()
+    cfg = load_companies_from_secrets()
     swag = cfg["swag"]
     larouche = cfg["larouche"]
     diffc = cfg["different_clothes"]
 
-    # Fields from config
     model_field_default = cfg.get("model_field", "default_code")
     template_model_field_default = cfg.get("template_model_field", "x_model_no")
     variant_code_field_default = cfg.get("variant_code_field", "default_code")
 
     # Sidebar
     st.sidebar.title("⚙️ Settings")
-    st.sidebar.markdown("**Odoo Connections** (from config.json)")
+    st.sidebar.markdown("**Odoo Connections** (from secrets)")
     st.sidebar.write(f"✅ {swag['name']}")
     st.sidebar.write(f"✅ {larouche['name']}")
     st.sidebar.write(f"✅ {diffc['name']}")
@@ -257,8 +332,8 @@ def main():
         )
 
     st.sidebar.info(
-        "URLs, DB names, API keys config.json se aa rahe hain. "
-        "Repo public karne se pehle config.json ko .gitignore karo."
+        "URLs, DB names, API keys Streamlit secrets se aa rahe hain. "
+        "Repo public karne se pehle config.json me real secrets mat rakho."
     )
 
     # Main UI
@@ -308,7 +383,7 @@ def main():
             st.stop()
 
         if mode == "Template total (simple)":
-            # Old simple logic
+            # Simple mode
             with st.spinner("Teeno Odoo se quantities nikal rahe hain..."):
                 swag_map = get_qty_for_models("swag", swag, models_list, model_field)
                 lrc_map = get_qty_for_models(
@@ -365,7 +440,7 @@ def main():
             )
 
         else:
-            # Variant-wise logic
+            # Variant-wise mode
             with st.spinner("Teeno Odoo me variants nikal rahe hain..."):
                 swag_tmpl_names, swag_variants = build_variant_map_for_system(
                     "swag",
@@ -389,12 +464,9 @@ def main():
                     variant_code_field,
                 )
 
-            # All keys: (model_value, variant_code)
             all_keys = set(swag_variants.keys()) | set(lrc_variants.keys()) | set(
                 diff_variants.keys()
             )
-            # Also handle case where some system has template but no variants (sum as total?)
-            # For now we only show variants present.
 
             rows = []
             for model_val, vcode in sorted(all_keys):
@@ -412,14 +484,12 @@ def main():
                 ):
                     continue
 
-                # Template name (kahin se bhi lo)
                 tmpl_name = (
                     swag_tmpl_names.get(model_val)
                     or lrc_tmpl_names.get(model_val)
                     or diff_tmpl_names.get(model_val)
                     or ""
                 )
-                # Variant display name / attrs
                 name = s.get("name") or l.get("name") or d.get("name") or ""
                 attrs = s.get("attrs") or l.get("attrs") or d.get("attrs") or ""
 
@@ -457,7 +527,7 @@ def main():
                 hide_index=True,
             )
 
-        # Download button common
+        # Download
         csv = df.to_csv(index=False).encode("utf-8-sig")
         st.download_button(
             "⬇️ Download as CSV",
